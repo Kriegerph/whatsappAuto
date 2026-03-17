@@ -1,0 +1,4 @@
+firebase-service-account.json
+sessions/
+.env
+node_modules/
