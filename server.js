@@ -159,6 +159,7 @@ const findFuncionarioByPhone = async (phone) => {
   return {
     funcionarioId: funcionarioDoc.id,
     funcionarioData,
+    criarChamadoAutomatico: funcionarioData.criarChamadoAutomatico,
     nomeFuncionario,
     empresaId,
     empresaData: empresaDoc.data(),
@@ -260,6 +261,19 @@ const handleMessagesUpsert = async (sock, event) => {
     console.log(`FuncionarioId: ${funcionario.funcionarioId}`);
     console.log(`EmpresaId: ${funcionario.empresaId}`);
     console.log("");
+
+    console.log("VALOR DO CAMPO:", funcionario.criarChamadoAutomatico);
+
+    if (
+      funcionario.criarChamadoAutomatico === false ||
+      funcionario.criarChamadoAutomatico === "false"
+    ) {
+      console.log(
+        `\u{1F6AB} Chamado bloqueado para ${funcionario.nomeFuncionario}`
+      );
+      console.log("");
+      continue;
+    }
 
     const nomeEmpresa =
       funcionario.empresaData?.nomeEmpresa || "Empresa nao identificada";
