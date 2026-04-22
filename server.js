@@ -14,6 +14,9 @@ const logger = pino({ level: "silent" });
 
 const RECONNECT_DELAY_MS = 5000;
 const OWNER_UID = "rHfL5p6hyDbUsTBYQBoh7E4Tavp2";
+const COUNTRY_CODE = "55";
+const LOCAL_LENGTH = 10;
+const LOCAL_WITH_NINTH_DIGIT_LENGTH = 11;
 
 const isFirestoreReady = Boolean(db) && isFirebaseConfigured;
 
@@ -51,15 +54,39 @@ const isPnJid = (jid = "") =>
 const isLidJid = (jid = "") =>
   jid.endsWith("@lid") || jid.endsWith("@hosted.lid");
 
-const normalizePhone = (jid = "") => {
-  if (!isPnJid(jid)) {
+const digitsOnly = (value = "") => String(value || "").replace(/\D/g, "");
+
+const stripCountryCode = (digits = "") =>
+  digits.startsWith(COUNTRY_CODE) ? digits.slice(COUNTRY_CODE.length) : digits;
+
+const removeNinthDigit = (localDigits = "") =>
+  localDigits.length === LOCAL_WITH_NINTH_DIGIT_LENGTH
+    ? `${localDigits.slice(0, 2)}${localDigits.slice(3)}`
+    : localDigits;
+
+const normalizePhoneTo12Digits = (value = "") => {
+  const cleaned = digitsOnly(value);
+  if (!cleaned) {
     return "";
   }
 
-  const normalizedJid = jid.replace(/:\d+@/, "@");
+  const localDigits = removeNinthDigit(stripCountryCode(cleaned));
+  if (localDigits.length !== LOCAL_LENGTH) {
+    return "";
+  }
+
+  return `${COUNTRY_CODE}${localDigits}`;
+};
+
+const normalizePhone = (jid = "") => {
+  if (!jid || (!isPnJid(jid) && !/^\d+$/.test(jid))) {
+    return "";
+  }
+
+  const normalizedJid = jid.includes("@") ? jid.replace(/:\d+@/, "@") : jid;
   const phone = normalizedJid.split("@")[0];
 
-  return /^\d+$/.test(phone) ? phone : "";
+  return normalizePhoneTo12Digits(phone);
 };
 
 const getMessageText = (messageContent) => {
@@ -95,6 +122,16 @@ const logIncomingMessage = ({ phone, text }) => {
   console.log("");
 };
 
+const normalizeDisplayName = (value = "") =>
+  String(value || "")
+    .trim()
+    .replace(/\s+/g, " ");
+
+const buildUnknownContactLabel = ({ displayName, phone }) => {
+  const nomeBase = normalizeDisplayName(displayName) || phone;
+  return `${nomeBase} (Novo numero)`;
+};
+
 const getChamadosCollection = () =>
   db.collection("users").doc(OWNER_UID).collection("chamados");
 
@@ -111,21 +148,47 @@ const findChamadoAberto = async ({ nomeEmpresa, nomeFuncionario }) => {
     .get();
 };
 
-const createChamado = async ({ empresaId, nomeEmpresa, nomeFuncionario }) => {
+const findChamadoAbertoByPhone = async (phone) => {
+  if (!db || !phone) {
+    return null;
+  }
+
+  const snapshot = await getChamadosCollection()
+    .where("telefoneOrigem", "==", phone)
+    .get();
+
+  return snapshot.docs.find((doc) => doc.data()?.status === "aberto") ?? null;
+};
+
+const createChamado = async ({
+  empresaId = "",
+  nomeEmpresa = "",
+  funcionarioId = "",
+  nomeFuncionario = "",
+  nomeCliente = "",
+  telefoneOrigem = "",
+}) => {
   if (!db) {
     return null;
   }
 
+  const clienteNome = nomeCliente || nomeEmpresa || "";
+
   return getChamadosCollection().add({
+    cliente: clienteNome,
+    clienteNome,
     empresa: nomeEmpresa,
     empresaId,
     funcionario: nomeFuncionario,
+    funcionarioId,
     motivo: "",
     status: "aberto",
     origem: "whatsapp",
+    telefoneOrigem,
     tempoAtendimento: null,
     dataFechamento: null,
     data: FieldValue.serverTimestamp(),
+    tipoCadastro: "novo",
   });
 };
 
@@ -134,11 +197,27 @@ const findFuncionarioByPhone = async (phone) => {
     return null;
   }
 
-  const snapshot = await db
-    .collectionGroup("funcionarios")
-    .where("telefone", "==", phone)
-    .limit(1)
-    .get();
+  const telefone = normalizePhoneTo12Digits(phone);
+  if (!telefone) {
+    return null;
+  }
+
+  const [telefoneSnapshot, telefoneBuscaSnapshot] = await Promise.all([
+    db
+      .collectionGroup("funcionarios")
+      .where("telefone", "==", telefone)
+      .limit(1)
+      .get(),
+    db
+      .collectionGroup("funcionarios")
+      .where("telefoneBusca", "==", telefone)
+      .limit(1)
+      .get(),
+  ]);
+
+  const snapshot = !telefoneSnapshot.empty
+    ? telefoneSnapshot
+    : telefoneBuscaSnapshot;
 
   if (snapshot.empty) {
     return null;
@@ -248,9 +327,28 @@ const handleMessagesUpsert = async (sock, event) => {
     const funcionario = await findFuncionarioByPhone(sender.phone);
 
     if (!funcionario) {
-      console.log(
-        `Nenhum funcionario encontrado para o telefone: ${sender.phone}`
-      );
+      const nomeContato = buildUnknownContactLabel({
+        displayName: msg.pushName,
+        phone: sender.phone,
+      });
+      const chamadoExistente = await findChamadoAbertoByPhone(sender.phone);
+
+      if (chamadoExistente) {
+        console.log("Chamado ja existente para numero desconhecido, nova mensagem ignorada");
+        console.log(`Contato: ${nomeContato}`);
+        console.log(`Numero: ${sender.phone}`);
+        console.log("");
+        continue;
+      }
+
+      await createChamado({
+        nomeCliente: nomeContato,
+        telefoneOrigem: sender.phone,
+      });
+
+      console.log("Chamado criado para numero desconhecido");
+      console.log(`Contato: ${nomeContato}`);
+      console.log(`Numero: ${sender.phone}`);
       console.log("");
       continue;
     }
@@ -292,8 +390,10 @@ const handleMessagesUpsert = async (sock, event) => {
 
     await createChamado({
       empresaId: funcionario.empresaId,
+      funcionarioId: funcionario.funcionarioId,
       nomeEmpresa,
       nomeFuncionario: funcionario.nomeFuncionario,
+      telefoneOrigem: sender.phone,
     });
 
     console.log("Chamado criado com sucesso");
