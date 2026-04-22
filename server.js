@@ -132,6 +132,23 @@ const buildUnknownContactLabel = ({ displayName, phone }) => {
   return `${nomeBase} (Novo numero)`;
 };
 
+const isFailedPreconditionError = (error) => error?.code === 9;
+
+const tryGetQuerySnapshot = async (query, queryLabel) => {
+  try {
+    return await query.get();
+  } catch (error) {
+    if (!isFailedPreconditionError(error)) {
+      throw error;
+    }
+
+    console.warn(
+      `Consulta Firestore ignorada por indice ausente (${queryLabel}).`
+    );
+    return null;
+  }
+};
+
 const getChamadosCollection = () =>
   db.collection("users").doc(OWNER_UID).collection("chamados");
 
@@ -202,24 +219,48 @@ const findFuncionarioByPhone = async (phone) => {
     return null;
   }
 
-  const [telefoneSnapshot, telefoneBuscaSnapshot] = await Promise.all([
+  const telefoneSnapshot = await tryGetQuerySnapshot(
     db
       .collectionGroup("funcionarios")
       .where("telefone", "==", telefone)
-      .limit(1)
-      .get(),
+      .limit(1),
+    "funcionarios.telefone"
+  );
+
+  if (telefoneSnapshot && !telefoneSnapshot.empty) {
+    const funcionarioDoc = telefoneSnapshot.docs[0];
+    const funcionarioData = funcionarioDoc.data();
+    const nomeFuncionario = funcionarioData.nomeFuncionario || "Sem nome";
+    const empresaRef = funcionarioDoc.ref.parent.parent;
+
+    if (!empresaRef) {
+      return null;
+    }
+
+    const empresaId = funcionarioDoc.ref.parent.parent.id;
+    const empresaDoc = await empresaRef.get();
+
+    return {
+      funcionarioId: funcionarioDoc.id,
+      funcionarioData,
+      criarChamadoAutomatico: funcionarioData.criarChamadoAutomatico,
+      nomeFuncionario,
+      empresaId,
+      empresaData: empresaDoc.data(),
+    };
+  }
+
+  const telefoneBuscaSnapshot = await tryGetQuerySnapshot(
     db
       .collectionGroup("funcionarios")
       .where("telefoneBusca", "==", telefone)
-      .limit(1)
-      .get(),
-  ]);
+      .limit(1),
+    "funcionarios.telefoneBusca"
+  );
 
-  const snapshot = !telefoneSnapshot.empty
-    ? telefoneSnapshot
-    : telefoneBuscaSnapshot;
+  const snapshot = telefoneBuscaSnapshot;
 
-  if (snapshot.empty) {
+  if (!snapshot || snapshot.empty) {
     return null;
   }
 
