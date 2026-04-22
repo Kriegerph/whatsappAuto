@@ -97,8 +97,34 @@ const getMessageText = (messageContent) => {
   if (messageContent.extendedTextMessage?.text)
     return messageContent.extendedTextMessage.text;
 
-  if (messageContent.imageMessage?.caption)
-    return messageContent.imageMessage.caption;
+  if (messageContent.imageMessage)
+    return messageContent.imageMessage.caption?.trim() || "[Imagem]";
+
+  if (messageContent.videoMessage)
+    return messageContent.videoMessage.caption?.trim() || "[Video]";
+
+  if (messageContent.audioMessage) return "[Audio]";
+
+  if (messageContent.documentMessage)
+    return messageContent.documentMessage.caption?.trim() || "[Documento]";
+
+  if (messageContent.stickerMessage) return "[Sticker]";
+
+  if (messageContent.contactMessage) return "[Contato]";
+
+  if (messageContent.contactsArrayMessage) return "[Contatos]";
+
+  if (messageContent.locationMessage) return "[Localizacao]";
+
+  if (messageContent.liveLocationMessage) return "[Localizacao em tempo real]";
+
+  if (messageContent.pollCreationMessage) return "[Enquete]";
+
+  if (messageContent.listResponseMessage) return "[Lista]";
+
+  if (messageContent.buttonsResponseMessage) return "[Botao]";
+
+  if (messageContent.templateButtonReplyMessage) return "[Botao]";
 
   if (messageContent.ephemeralMessage?.message)
     return getMessageText(messageContent.ephemeralMessage.message);
@@ -111,6 +137,9 @@ const getMessageText = (messageContent) => {
 
   if (messageContent.viewOnceMessageV2Extension?.message)
     return getMessageText(messageContent.viewOnceMessageV2Extension.message);
+
+  if (messageContent.documentWithCaptionMessage?.message)
+    return getMessageText(messageContent.documentWithCaptionMessage.message);
 
   return "";
 };
