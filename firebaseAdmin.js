@@ -1,4 +1,5 @@
 import { existsSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { initializeApp, cert, getApps } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
 
@@ -30,10 +31,32 @@ const parseServiceAccountJson = (value, sourceLabel) => {
   }
 };
 
+const loadServiceAccountFromFile = (pathOrUrl, sourceLabel) => {
+  const filePath = pathOrUrl instanceof URL ? fileURLToPath(pathOrUrl) : pathOrUrl;
+
+  if (!existsSync(filePath)) {
+    console.warn(`${sourceLabel} nao encontrado. Firestore desabilitado.`);
+    return null;
+  }
+
+  try {
+    const fileContent = readFileSync(filePath, 'utf8');
+    return parseServiceAccountJson(fileContent, sourceLabel);
+  } catch (error) {
+    console.error(`Falha ao carregar ${sourceLabel}:`, error.message);
+    return null;
+  }
+};
+
 const loadServiceAccountFromEnv = () => {
   const serviceAccountJson = process.env.FIREBASE_SERVICE_ACCOUNT_JSON?.trim();
   if (serviceAccountJson) {
     return parseServiceAccountJson(serviceAccountJson, 'FIREBASE_SERVICE_ACCOUNT_JSON');
+  }
+
+  const credentialsPath = process.env.GOOGLE_APPLICATION_CREDENTIALS?.trim();
+  if (credentialsPath) {
+    return loadServiceAccountFromFile(credentialsPath, 'GOOGLE_APPLICATION_CREDENTIALS');
   }
 
   const projectId = process.env.FIREBASE_PROJECT_ID?.trim();
@@ -64,29 +87,21 @@ const loadServiceAccount = () => {
     return envServiceAccount;
   }
 
-  if (!existsSync(serviceAccountPath)) {
-    console.warn('Arquivo firebase-service-account.json nao encontrado. Firestore desabilitado.');
+  const fileServiceAccount = loadServiceAccountFromFile(
+    serviceAccountPath,
+    'firebase-service-account.json'
+  );
+
+  if (!fileServiceAccount) {
     return null;
   }
 
-  try {
-    const fileContent = readFileSync(serviceAccountPath, 'utf8');
-    const parsedContent = JSON.parse(fileContent);
-    const serviceAccount = {
-      ...parsedContent,
-      private_key: normalizePrivateKey(parsedContent.private_key)
-    };
-
-    if (!isValidServiceAccount(serviceAccount)) {
-      console.warn('firebase-service-account.json ainda esta com dados placeholder. Firestore desabilitado.');
-      return null;
-    }
-
-    return serviceAccount;
-  } catch (error) {
-    console.error('Falha ao carregar firebase-service-account.json:', error.message);
+  if (!isValidServiceAccount(fileServiceAccount)) {
+    console.warn('firebase-service-account.json ainda esta com dados placeholder. Firestore desabilitado.');
     return null;
   }
+
+  return fileServiceAccount;
 };
 
 const serviceAccount = loadServiceAccount();
