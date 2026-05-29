@@ -41,6 +41,16 @@ const restoreCreds = (storedCreds) => {
 
 const restoreKeys = (storedKeys) => deserializeData(storedKeys) ?? {};
 
+export async function clearFirestoreAuthState() {
+  if (!db) {
+    console.error("Nao foi possivel limpar sessao do WhatsApp: Firestore nao configurado.");
+    return;
+  }
+
+  await getSessionRef().delete();
+  console.log("Sessao do WhatsApp removida do Firestore.");
+}
+
 export async function useFirestoreAuthState() {
   console.log("Iniciando carregamento da sessao do Firestore...");
 

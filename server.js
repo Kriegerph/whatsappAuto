@@ -8,7 +8,7 @@ import pino from "pino";
 import qrcode from "qrcode-terminal";
 import { FieldValue } from "firebase-admin/firestore";
 import { db, isFirebaseConfigured } from "./firebaseAdmin.js";
-import { useFirestoreAuthState } from "./firestoreAuthState.js";
+import { clearFirestoreAuthState, useFirestoreAuthState } from "./firestoreAuthState.js";
 
 const logger = pino({ level: "silent" });
 
@@ -509,9 +509,14 @@ const handleConnectionUpdate = (sock, update) => {
     return;
   }
 
-  console.error(
-    "Logout detectado. Escaneie o QR Code novamente para autenticar."
-  );
+  console.error("Logout detectado. Limpando sessao salva para gerar um novo QR Code.");
+  clearFirestoreAuthState()
+    .catch((error) => {
+      console.error("Falha ao limpar sessao do WhatsApp no Firestore:", error);
+    })
+    .finally(() => {
+      scheduleReconnect();
+    });
 };
 
 async function startWhatsApp() {
